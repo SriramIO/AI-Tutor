@@ -10,13 +10,11 @@ st.set_page_config(page_title="AI Tutor for Personalized Learning", page_icon="�
 PROVIDERS = {
     "Gemini": {
         "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/",
-        "default_model": "gemini-flash-latest",
-        "filter": "gemini",   # keyword used to keep chat models in the list
+        "model": "gemini-3.8-flash",
     },
     "OpenAI": {
         "base_url": None,  # SDK default: https://api.openai.com/v1
-        "default_model": "gpt-4o-mini",
-        "filter": "gpt",
+        "model": "gpt-4o-mini",
     },
 }
 
@@ -82,19 +80,6 @@ def create_client(provider: str, api_key: str) -> OpenAI:
     return OpenAI(api_key=api_key)
 
 
-def fetch_chat_models(provider: str, api_key: str) -> list:
-    """Ask the provider which models this API key can access."""
-    client = create_client(provider, api_key)
-    keyword = PROVIDERS[provider]["filter"]
-    ids = []
-    for m in client.models.list():
-        # Gemini's OpenAI-compatible endpoint may prefix IDs with "models/"
-        model_id = m.id.removeprefix("models/")
-        if keyword in model_id.lower():
-            ids.append(model_id)
-    return sorted(set(ids))
-
-
 def stream_completion(client: OpenAI, model: str, messages: list):
     """Yield text chunks from a streamed chat completion."""
     stream = client.chat.completions.create(
@@ -114,8 +99,6 @@ if "messages" not in st.session_state:
     st.session_state.messages = []  # list of {"role": "user"|"assistant", "content": str}
 if "pending_prompt" not in st.session_state:
     st.session_state.pending_prompt = None
-if "available_models" not in st.session_state:
-    st.session_state.available_models = {}  # provider -> list of model IDs
 
 
 def reset_conversation():
@@ -135,24 +118,7 @@ with st.sidebar:
 
     provider = st.selectbox("Provider", list(PROVIDERS.keys()))
     api_key = st.text_input("API Key", type="password", placeholder="Paste your API key")
-
-    # Model selection: load what the key can access, or type an ID manually
-    if st.button("🔍 Load available models", use_container_width=True, disabled=not api_key):
-        try:
-            st.session_state.available_models[provider] = fetch_chat_models(provider, api_key)
-            if not st.session_state.available_models[provider]:
-                st.warning("No chat models found for this key. Enter a model ID manually.")
-        except Exception as e:
-            st.error(f"Could not load models: {e}")
-
-    models = st.session_state.available_models.get(provider, [])
-    default_model = PROVIDERS[provider]["default_model"]
-
-    if models:
-        default_index = models.index(default_model) if default_model in models else 0
-        model = st.selectbox("Model", models, index=default_index, key=f"model_list_{provider}")
-    else:
-        model = st.text_input("Model ID", value=default_model, key=f"model_text_{provider}")
+    st.caption(f"Model: `{PROVIDERS[provider]['model']}`")
 
     st.divider()
     st.subheader("🎯 Personalization")
@@ -195,9 +161,6 @@ if prompt:
     if not api_key:
         st.warning("Please enter your API key in the sidebar to start learning.")
         st.stop()
-    if not model:
-        st.warning("Please select or enter a model in the sidebar.")
-        st.stop()
 
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -209,6 +172,7 @@ if prompt:
 
     try:
         client = create_client(provider, api_key)
+        model = PROVIDERS[provider]["model"]
 
         with st.chat_message("assistant"):
             reply = st.write_stream(stream_completion(client, model, api_messages))
@@ -218,4 +182,4 @@ if prompt:
     except Exception as e:
         # Roll back the unanswered user message so history stays consistent
         st.session_state.messages.pop()
-        st.error(f"Request failed with model `{model}`: {e}")
+        st.error(f"Request failed: {e}")
